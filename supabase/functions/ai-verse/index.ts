@@ -32,23 +32,47 @@ async function hash(s: string) {
 }
 
 async function callModel(prompt: string): Promise<string> {
-  const provider = Deno.env.get('AI_PROVIDER') ?? 'anthropic';
-  const model = Deno.env.get('AI_MODEL');
+  // Forgiving about how the settings were typed: case and spaces don't matter; with one key set, that provider is used.
+  const env = (k: string) => (Deno.env.get(k) ?? '').trim();
+  const hasGemini = !!env('GEMINI_API_KEY'), hasAnthropic = !!env('ANTHROPIC_API_KEY');
+  let provider = env('AI_PROVIDER').toLowerCase();
+  if (provider !== 'gemini' && provider !== 'anthropic') provider = hasGemini && !hasAnthropic ? 'gemini' : 'anthropic';
+  if (provider === 'anthropic' && !hasAnthropic && hasGemini) provider = 'gemini';
+  const model = env('AI_MODEL').replace(/^models\//, '');
   if (!model) throw new Error('AI_MODEL is not set');
   if (provider === 'gemini') {
-    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${Deno.env.get('GEMINI_API_KEY')}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ systemInstruction: { parts: [{ text: SYSTEM }] }, contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 700 } }),
-    });
-    const d = await r.json();
-    return d?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? '').join('') ?? '';
+    // Google's models are sometimes busy (503) or rate-limited (429): try the next one, as faithBOT does.
+    const fallbacks = (env('AI_FALLBACK_MODELS') || 'gemini-flash-lite-latest,gemini-pro-latest').split(',').map(x => x.trim()).filter(Boolean);
+    const models = [model, ...fallbacks].filter((m, i, a) => a.indexOf(m) === i);
+    let last = '';
+    for (const m of models) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${env('GEMINI_API_KEY')}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ systemInstruction: { parts: [{ text: SYSTEM }] }, contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 1024 } }),
+        });
+        const d = await r.json();
+        if (r.ok) {
+          const out = d?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? '').join('') ?? '';
+          if (out.trim()) return out;
+          last = `${m}: empty answer`;
+          break;
+        }
+        last = `Gemini ${r.status}: ${d?.error?.message ?? 'error'}`;
+        if (r.status !== 503 && r.status !== 429 && r.status !== 404) throw new Error(last);
+        if (r.status === 404) break;
+        await new Promise(res => setTimeout(res, 800));
+      }
+    }
+    throw new Error(last);
   }
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': Deno.env.get('ANTHROPIC_API_KEY') ?? '', 'anthropic-version': '2023-06-01' },
+    headers: { 'Content-Type': 'application/json', 'x-api-key': env('ANTHROPIC_API_KEY'), 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({ model, max_tokens: 700, system: SYSTEM, messages: [{ role: 'user', content: prompt }] }),
   });
   const d = await r.json();
+  if (!r.ok) throw new Error(`Anthropic ${r.status}: ${d?.error?.message ?? 'error'}`);
   return (d?.content ?? []).filter((b: { type: string }) => b.type === 'text').map((b: { text: string }) => b.text).join('');
 }
 
