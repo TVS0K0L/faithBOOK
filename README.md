@@ -43,6 +43,11 @@ supabase secrets set AI_PROVIDER=anthropic AI_MODEL=<model id> ANTHROPIC_API_KEY
 
 4. In Supabase → Authentication → Providers, turn on Apple and Email.
 
+**AI speed settings** (optional secrets): `AI_FAST_MODEL` (toolbar buttons, default the fast Flash-Lite model), `AI_MODEL`
+(free questions), `AI_FALLBACK_MODELS`, `AI_HEDGE_MS` (start a parallel try after this long, default 3500),
+`AI_FIRST_TOKEN_MS` (streaming: switch model if no words by then, default 4000). Measured: first words in ~2 s,
+a full toolbar answer in ~2.5 s, a cached answer in ~1 s.
+
 Test the database rules locally on any empty Postgres 15+: `supabase/tests/run.sh`.
 Test the live project end to end (two temporary users post, react and pray, then are deleted): `SB_URL=... SB_PUBLISHABLE=... SB_SECRET=... node supabase/tests/e2e.mjs`.
 

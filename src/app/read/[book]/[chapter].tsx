@@ -6,8 +6,9 @@ import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { usePalette } from '../../../theme';
 import { getLang, t } from '../../../lib/i18n';
 import { BOOKS, bookName, readChapter, refLabel, type Verse } from '../../../lib/bible';
-import { ACTIONS, askVerse, type VerseAction } from '../../../lib/ai';
+import { ACTIONS, askVerseStream, type VerseAction } from '../../../lib/ai';
 import { earn } from '../../../lib/progress';
+import Md from '../../../components/Md';
 
 export default function Reader() {
   const c = usePalette();
@@ -30,14 +31,18 @@ export default function Reader() {
 
   const run = async (action: VerseAction, label: string) => {
     const text = picked.length ? picked.map(v => v.text).join(' ') : (verses ?? []).map(v => `${v.v} ${v.text}`).join(' ');
+    const title = `${label} · ${ref}`;
     setBusy(true);
-    setAnswer({ title: `${label} · ${ref}`, text: '' });
+    setAnswer({ title, text: '' });
     try {
-      const a = await askVerse({ action, ref, text, lang, question: action === 'ask' ? question : undefined });
-      setAnswer({ title: `${label} · ${ref}`, text: a });
+      // the words appear as they are written; "Thinking…" only until the first ones arrive
+      await askVerseStream({ action, ref, text, lang, question: action === 'ask' ? question : undefined }, piece => {
+        setBusy(false);
+        setAnswer(a => (a && a.title === title ? { title, text: a.text + piece } : a));
+      });
       earn(10);
-    } catch {
-      setAnswer({ title: `${label} · ${ref}`, text: t('Try again') });
+    } catch (e) {
+      setAnswer({ title, text: (e as Error).message || t('Try again') });
     } finally { setBusy(false); }
   };
 
@@ -87,7 +92,7 @@ export default function Reader() {
           <View style={{ backgroundColor: c.card, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: 20, maxHeight: '80%' }}>
             <Text style={{ color: c.accent, fontWeight: '800', marginBottom: 10 }}>{answer?.title}</Text>
             <ScrollView>
-              {busy ? <Text style={{ color: c.mute }}>{t('Thinking…')}</Text> : <Text style={{ color: c.ink, fontSize: 16, lineHeight: 25 }}>{answer?.text}</Text>}
+              {busy ? <Text style={{ color: c.mute }}>{t('Thinking…')}</Text> : <Md text={answer?.text ?? ''} color={c.ink} />}
               <Text style={{ color: c.mute, fontSize: 12, marginTop: 14 }}>{t('This is a study aid, not a pastor. Check it with Scripture and your church.')}</Text>
             </ScrollView>
             <Pressable onPress={() => setAnswer(null)} style={{ marginTop: 14, alignItems: 'center', padding: 12, borderRadius: 14, backgroundColor: c.accentSoft }}>
