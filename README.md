@@ -44,6 +44,7 @@ supabase secrets set AI_PROVIDER=anthropic AI_MODEL=<model id> ANTHROPIC_API_KEY
 4. In Supabase → Authentication → Providers, turn on Apple and Email.
 
 Test the database rules locally on any empty Postgres 15+: `supabase/tests/run.sh`.
+Test the live project end to end (two temporary users post, react and pray, then are deleted): `SB_URL=... SB_PUBLISHABLE=... SB_SECRET=... node supabase/tests/e2e.mjs`.
 
 ## Ship to the App Store
 
