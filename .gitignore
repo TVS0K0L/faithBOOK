@@ -13,3 +13,6 @@ web-build/
 ios/
 android/
 .DS_Store
+
+# temporary local test scripts
+*.tmp.mjs
