@@ -45,13 +45,22 @@ async function callModel(prompt: string): Promise<string> {
     const fallbacks = (env('AI_FALLBACK_MODELS') || 'gemini-flash-lite-latest,gemini-pro-latest').split(',').map(x => x.trim()).filter(Boolean);
     const models = [model, ...fallbacks].filter((m, i, a) => a.indexOf(m) === i);
     let last = '';
+    const deadline = Date.now() + 100_000; // stay well inside the platform's 150-second limit
     for (const m of models) {
       for (let attempt = 0; attempt < 2; attempt++) {
-        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${env('GEMINI_API_KEY')}`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
+        const left = deadline - Date.now();
+        if (left < 5_000) throw new Error(last || 'The AI is busy. Please try again in a minute.');
+        let r: Response;
+        try {
+          r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${env('GEMINI_API_KEY')}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(Math.min(25_000, left)),
           body: JSON.stringify({ systemInstruction: { parts: [{ text: SYSTEM }] }, contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 1024 } }),
-        });
-        const d = await r.json();
+          });
+        } catch {
+          last = `${m}: no answer in time`;
+          break; // too slow: try the next model
+        }
+        const d = await r.json().catch(() => ({}));
         if (r.ok) {
           const out = d?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? '').join('') ?? '';
           if (out.trim()) return out;
@@ -69,6 +78,7 @@ async function callModel(prompt: string): Promise<string> {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': env('ANTHROPIC_API_KEY'), 'anthropic-version': '2023-06-01' },
+    signal: AbortSignal.timeout(100_000),
     body: JSON.stringify({ model, max_tokens: 700, system: SYSTEM, messages: [{ role: 'user', content: prompt }] }),
   });
   const d = await r.json();
